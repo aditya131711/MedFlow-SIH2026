@@ -1,0 +1,1612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="MedFlow — SIH 2026 healthcare workflow MVP prototype" />
+  <title>MedFlow — SIH 2026 MVP</title>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/lucide-react@0.468.0/dist/umd/lucide-react.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js" crossorigin></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+  <style>
+    html, body, #root { margin: 0; min-height: 100%; }
+    body { background: #F6F8F8; }
+    * { box-sizing: border-box; }
+    button, input, select, textarea { font: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+const { useState, useMemo, useRef, useEffect } = React;
+const IconFallback = ({ size = 18, color = "currentColor", className = "", strokeWidth = 2 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden="true">
+    <circle cx="12" cy="12" r="8" stroke={color} strokeWidth={strokeWidth} />
+    <path d="M9 12h6M12 9v6" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+  </svg>
+);
+
+// The UMD build normally exposes lucideReact. If the CDN fails or exposes a
+// different global name, use fallback icons instead of crashing the whole app.
+const lucideSource = window.lucideReact || window.LucideReact || {};
+const lucideReact = new Proxy(lucideSource, {
+  get: (target, key) => target[key] || IconFallback
+});
+
+const {
+  Activity, Stethoscope, ClipboardList, Users, Pill, ShieldCheck, LayoutDashboard,
+  UserPlus, HeartPulse, ListOrdered, FileText, QrCode, History, Wifi, WifiOff,
+  Languages, Lock, CheckCircle2, XCircle, AlertTriangle, ChevronRight, ChevronLeft,
+  ArrowRight, Play, X, ClipboardCheck, Syringe, ScanLine, BadgeCheck, Clock,
+  ShieldAlert, Database, RefreshCw, LogOut, Home, Bell, User, ScrollText
+} = lucideReact;
+
+/* ============================================================
+   MedFlow — vertexiQ · SIH 2026 (SIH26133)
+   Single-file deployable MVP prototype.
+   Local persistence is enabled for reliable demos; backend integration can be added later.
+   ============================================================ */
+
+/* ---------------- Design tokens ---------------- */
+const C = {
+  navy: "#0B2E33",
+  navyDeep: "#082226",
+  teal: "#0F5C5C",
+  tealSoft: "#E4F1EF",
+  sky: "#2E9BD6",
+  skySoft: "#E7F4FC",
+  coral: "#E1562F",
+  coralSoft: "#FBE7E0",
+  amber: "#E8A33D",
+  amberSoft: "#FCF0DD",
+  green: "#2F9E64",
+  greenSoft: "#E5F5EC",
+  bg: "#F6F8F8",
+  card: "#FFFFFF",
+  text: "#152B2E",
+  muted: "#5B6E70",
+  faint: "#8FA0A1",
+  border: "#E1E8E8",
+};
+
+const FONTS = `
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
+.mf-root { font-family: 'Inter', sans-serif; color: ${C.text}; }
+.mf-display { font-family: 'Space Grotesk', sans-serif; }
+.mf-mono { font-family: 'IBM Plex Mono', monospace; }
+.mf-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.mf-scroll::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 8px; }
+@keyframes mf-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+.mf-live { animation: mf-pulse 1.8s ease-in-out infinite; }
+@keyframes mf-slide { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.mf-in { animation: mf-slide .28s ease-out; }
+`;
+
+/* ---------------- Small primitives ---------------- */
+const Card = ({ children, style, className = "", pad = "p-5" }) => (
+  <div
+    className={`rounded-2xl ${pad} ${className}`}
+    style={{ background: C.card, border: `1px solid ${C.border}`, boxShadow: "0 1px 2px rgba(11,46,51,0.04)", ...style }}
+  >
+    {children}
+  </div>
+);
+
+const Badge = ({ children, tone = "teal" }) => {
+  const tones = {
+    teal: { bg: C.tealSoft, fg: C.teal },
+    coral: { bg: C.coralSoft, fg: C.coral },
+    amber: { bg: C.amberSoft, fg: "#8A5B14" },
+    green: { bg: C.greenSoft, fg: C.green },
+    sky: { bg: C.skySoft, fg: C.sky },
+    gray: { bg: "#EFF2F2", fg: C.muted },
+  };
+  const t = tones[tone] || tones.teal;
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold"
+      style={{ background: t.bg, color: t.fg }}
+    >
+      {children}
+    </span>
+  );
+};
+
+const Btn = ({ children, onClick, variant = "primary", icon: Icon, className = "", disabled, type = "button" }) => {
+  const base = "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all";
+  const styles = {
+    primary: { background: C.navy, color: "#fff" },
+    coral: { background: C.coral, color: "#fff" },
+    sky: { background: C.sky, color: "#fff" },
+    outline: { background: "transparent", color: C.navy, border: `1.5px solid ${C.navy}` },
+    ghost: { background: "transparent", color: C.muted },
+    subtle: { background: C.tealSoft, color: C.teal },
+  };
+  return (
+    <button
+      type={type}
+      disabled={disabled}
+      onClick={onClick}
+      className={`${base} ${className} ${disabled ? "opacity-40 cursor-not-allowed" : "hover:opacity-90 active:scale-[0.98]"}`}
+      style={styles[variant]}
+    >
+      {Icon && <Icon size={16} strokeWidth={2.3} />}
+      {children}
+    </button>
+  );
+};
+
+const SectionLabel = ({ eyebrow, title, sub }) => (
+  <div className="mb-5">
+    {eyebrow && (
+      <div className="mf-mono text-xs tracking-wider uppercase mb-1.5" style={{ color: C.sky }}>
+        {eyebrow}
+      </div>
+    )}
+    <h2 className="mf-display text-2xl font-semibold" style={{ color: C.navy }}>{title}</h2>
+    {sub && <p className="text-sm mt-1.5" style={{ color: C.muted }}>{sub}</p>}
+  </div>
+);
+
+const Field = ({ label, children }) => (
+  <label className="block">
+    <span className="text-xs font-semibold mb-1.5 block" style={{ color: C.muted }}>{label}</span>
+    {children}
+  </label>
+);
+
+const inputStyle = {
+  width: "100%", border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "9px 12px",
+  fontSize: 14, outline: "none", background: "#fff", color: C.text,
+};
+const Input = (props) => <input {...props} style={{ ...inputStyle, ...(props.style || {}) }} className="focus:ring-2" />;
+const Select = ({ children, ...props }) => <select {...props} style={inputStyle}>{children}</select>;
+const TextArea = (props) => <textarea {...props} style={{ ...inputStyle, resize: "vertical", ...(props.style || {}) }} />;
+
+const priorityTone = (p) => (p === "Emergent" || p === "High" ? "coral" : p === "Urgent" || p === "Moderate" ? "amber" : "green");
+
+/* ---------------- Journey stage config ---------------- */
+const STAGES = [
+  { key: "registration", label: "Registration", icon: UserPlus },
+  { key: "symptoms", label: "Symptoms", icon: ClipboardList },
+  { key: "triage", label: "Triage", icon: Activity },
+  { key: "validation", label: "Nurse Validation", icon: ShieldCheck },
+  { key: "queue", label: "Queue", icon: ListOrdered },
+  { key: "doctor", label: "Doctor", icon: Stethoscope },
+  { key: "prescription", label: "Prescription", icon: FileText },
+  { key: "pharmacy", label: "Pharmacy", icon: Pill },
+  { key: "record", label: "Patient Record", icon: History },
+];
+
+/* ---------------- Seed data ---------------- */
+const seedPatients = () => ({
+  P001: {
+    id: "P001", encounterId: "ENC-98213", name: "Rohan Kadam", age: 34, gender: "Male",
+    mobile: "98•••••210", address: "Ambernath, Thane", language: "English",
+    newOrExisting: "New", history: "No known chronic conditions.", emergencyContact: "Priya Kadam (Spouse)",
+    registeredAt: null, stage: "landing",
+    symptoms: null, vitals: null, triage: null, queuePos: null, consult: null,
+    prescription: null, pharmacy: null,
+    pastVisits: [
+      { date: "12 Feb 2026", doctor: "Dr. Anjali Mehta", encounterId: "ENC-77410", summary: "Seasonal viral fever — prescribed antipyretics, advised rest.", },
+    ],
+  },
+  PA: {
+    id: "PA", name: "Patient A", age: 58, gender: "Male", presentation: "Chest pain, BP 160/95, SpO₂ 92%",
+    systemRec: "High Priority", esi: "ESI Level 2 — Emergent", nurseAction: "Validated → moved to front of queue", finalPriority: "Emergent",
+  },
+  PB: {
+    id: "PB", name: "Patient B", age: 27, gender: "Female", presentation: "Fever 39°C, cough, normal vitals",
+    systemRec: "Moderate Priority", esi: "ESI Level 3 — Urgent", nurseAction: "Confirmed → queued accordingly", finalPriority: "Urgent",
+  },
+  PC: {
+    id: "PC", name: "Patient C", age: 41, gender: "Male", presentation: "Minor cut, stable vitals",
+    systemRec: "Low Priority", esi: "ESI Level 4 — Less Urgent", nurseAction: "Validated → queued last", finalPriority: "Less Urgent",
+  },
+});
+
+const nowTime = () => new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+/* ============================================================
+   ROOT APP
+   ============================================================ */
+function MedFlowPrototype() {
+  const STORAGE_KEY = "medflow-mvp-v2";
+  const initialState = useMemo(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (saved?.patients?.P001) return saved;
+    } catch (_) {}
+    return {
+      patients: seedPatients(),
+      audit: [{ time: nowTime(), actor: "System", action: "Session initialized — MedFlow MVP v2 ready." }]
+    };
+  }, []);
+  const [role, setRole] = useState(null); // patient | nurse | doctor | pharmacist | admin
+  const [screen, setScreen] = useState(null);
+  const [patients, setPatients] = useState(initialState.patients);
+  const [audit, setAudit] = useState(initialState.audit);
+  const [offline, setOffline] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [language, setLanguage] = useState("English");
+  const [demo, setDemo] = useState({ active: false, step: -1 });
+  const [selectedPatientId, setSelectedPatientId] = useState("P001");
+  const [toast, setToast] = useState(null);
+
+  const p001 = patients.P001;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ patients, audit }));
+    } catch (_) {}
+  }, [patients, audit]);
+
+  const logAction = (action, actor = role ? role[0].toUpperCase() + role.slice(1) : "System") => {
+    setAudit((a) => [{ time: nowTime(), actor, action }, ...a]);
+  };
+
+  const showToast = (msg) => {
+    setToast(msg);
+    window.clearTimeout(showToast._t);
+    showToast._t = window.setTimeout(() => setToast(null), 2600);
+  };
+
+  const updatePatient = (id, patch) =>
+    setPatients((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+
+  /* ---------- Demo mode script ---------- */
+  const demoScript = [
+    { role: "patient", screen: "registration", note: "Patient P001 arrives at reception and registers." },
+    { role: "patient", screen: "symptoms", note: "Patient reports symptoms and basic vitals are captured." },
+    { role: "nurse", screen: "triage", note: "Protocol-based triage generates a system recommendation for nurse review." },
+    { role: "nurse", screen: "dashboard", note: "Nurse validates the recommendation — priority is confirmed." },
+    { role: "patient", screen: "queue", note: "Queue updates in real time; patient sees live position." },
+    { role: "doctor", screen: "context", note: "Doctor opens the patient — full pre-filled context, no re-entry." },
+    { role: "doctor", screen: "consultation", note: "Doctor completes consultation notes and assessment." },
+    { role: "doctor", screen: "prescription", note: "Structured e-prescription generated with a unique QR ID." },
+    { role: "pharmacist", screen: "verify", note: "Pharmacist scans the QR and verifies the prescription." },
+    { role: "patient", screen: "record", note: "Encounter is stored — one continuous digital patient record." },
+  ];
+
+  const runDemoStep = (i) => {
+    if (i < 0 || i >= demoScript.length) return;
+    const s = demoScript[i];
+    setRole(s.role);
+    setScreen(s.screen);
+    setDemo({ active: true, step: i });
+
+    // Apply state transitions so each screen shows the right data at the right time
+    if (s.screen === "registration" && !p001.registeredAt) {
+      updatePatient("P001", { registeredAt: nowTime(), stage: "registration" });
+      logAction("Patient registered — Reception", "Reception");
+    }
+    if (s.screen === "symptoms") {
+      updatePatient("P001", {
+        symptoms: { complaint: "Sudden high fever with chills, mild breathlessness", list: "Fever, chills, fatigue, mild breathlessness", duration: "Since last night (~14 hrs)", relevantHistory: "No known chronic illness. No known drug allergies." },
+        vitals: { bp: "128/84", pulse: "104 bpm", spo2: "95%", temp: "39.4°C" },
+        stage: "symptoms",
+      });
+      logAction("Symptoms & vitals captured — Reception", "Reception");
+    }
+    if (s.screen === "triage" && role !== "nurse") {
+      // pre-compute triage rec so nurse dashboard has it
+    }
+    if (i === 2) {
+      updatePatient("P001", {
+        triage: { systemRec: "Urgent", protocol: "ESI (Emergency Severity Index) — configured for demo", validation: null, finalPriority: null },
+        stage: "triage",
+      });
+      logAction("Priority recommendation generated — System", "System");
+    }
+    if (i === 3) {
+      updatePatient("P001", {
+        triage: {
+          ...(p001.triage || {
+            systemRec: "Urgent",
+            protocol: "ESI (Emergency Severity Index) — configured for demo"
+          }),
+          validation: {
+            status: "Accepted",
+            note: "Vitals consistent with system recommendation.",
+            by: "Nurse Kavita Rao",
+            at: nowTime()
+          },
+          finalPriority: "Urgent"
+        },
+        queuePos: 2,
+        stage: "queue"
+      });
+      logAction("Recommendation validated — Nurse Kavita Rao", "Nurse");
+    }
+    if (i === 5) {
+      updatePatient("P001", { stage: "doctor" });
+    }
+    if (i === 6) {
+      logAction("Consultation started — Dr. Ansari", "Doctor");
+    }
+    if (i === 7) {
+      updatePatient("P001", {
+        consult: { notes: "Patient presents with febrile illness, likely viral. No signs of respiratory distress at rest. Advised symptomatic management and review in 48 hrs if unresolved.", assessment: "Probable viral fever — routine workup", followUp: "Review in 48 hours if fever persists; return sooner if breathlessness worsens." },
+        prescription: { doctor: "Dr. S. Ansari", datetime: nowTime(), qrId: "RX-MF-77281", items: [
+          { name: "Paracetamol", strength: "650mg", dosage: "1 tablet", frequency: "Every 6 hrs (SOS)", duration: "3 days", instructions: "After food" },
+          { name: "Cetirizine", strength: "10mg", dosage: "1 tablet", frequency: "Once daily (night)", duration: "3 days", instructions: "After food" },
+          { name: "ORS Sachets", strength: "—", dosage: "1 sachet in 1L water", frequency: "As needed", duration: "3 days", instructions: "Maintain hydration" },
+        ] },
+        stage: "prescription",
+      });
+      logAction("Structured prescription generated — Dr. S. Ansari", "Doctor");
+    }
+    if (i === 8) {
+      updatePatient("P001", { pharmacy: { status: "Verified & Dispensed", at: nowTime() }, stage: "pharmacy" });
+      logAction("Prescription verified & dispensed — Pharmacist M. Iyer", "Pharmacist");
+    }
+    if (i === 9) {
+      updatePatient("P001", { stage: "record" });
+      logAction("Encounter closed & stored in patient record — System", "System");
+    }
+  };
+
+  const startDemo = () => runDemoStep(0);
+  const nextDemo = () => runDemoStep(demo.step + 1);
+  const prevDemo = () => runDemoStep(Math.max(0, demo.step - 1));
+  const exitDemo = () => setDemo({ active: false, step: -1 });
+
+  const goRole = (r) => {
+    setRole(r);
+    setDemo({ active: false, step: -1 });
+    const defaults = { patient: "home", nurse: "dashboard", doctor: "dashboard", pharmacist: "verify", admin: "overview" };
+    setScreen(defaults[r]);
+  };
+
+  const logout = () => {
+    setRole(null); setScreen(null); setDemo({ active: false, step: -1 });
+  };
+
+  const resetDemoData = () => {
+    const fresh = seedPatients();
+    setPatients(fresh);
+    setAudit([{ time: nowTime(), actor: "System", action: "Demo data reset — MedFlow MVP v2 ready." }]);
+    setDemo({ active: false, step: -1 });
+    setRole(null);
+    setScreen(null);
+    showToast("Demo data reset");
+  };
+
+  const toggleOffline = () => {
+    if (!offline) {
+      setOffline(true);
+      showToast("Offline Mode — changes are saved locally on this device");
+      logAction("Device went offline — local capture active", "System");
+    } else {
+      setSyncing(true);
+      showToast("Synchronizing…");
+      window.setTimeout(() => {
+        setSyncing(false);
+        setOffline(false);
+        showToast("Synced successfully");
+        logAction("Reconnected — data synchronized", "System");
+      }, 1400);
+    }
+  };
+
+  /* ---------- shell ---------- */
+  return (
+    <div className="mf-root min-h-screen w-full" style={{ background: C.bg }}>
+      <style>{FONTS}</style>
+
+      {toast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 mf-in">
+          <div className="rounded-full px-4 py-2 text-sm font-semibold shadow-lg flex items-center gap-2"
+            style={{ background: C.navy, color: "#fff" }}>
+            {syncing ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+            {toast}
+          </div>
+        </div>
+      )}
+
+      {!role ? (
+        <Landing onSelectRole={goRole} onStartDemo={() => { goRole("patient"); startDemo(); }} />
+      ) : (
+        <AppShell
+          role={role} screen={screen} setScreen={setScreen} logout={logout}
+          offline={offline} toggleOffline={toggleOffline} syncing={syncing}
+          language={language} setLanguage={setLanguage}
+          demo={demo} nextDemo={nextDemo} prevDemo={prevDemo} exitDemo={exitDemo} demoScript={demoScript}
+          patients={patients} p001={p001}
+          selectedPatientId={selectedPatientId} setSelectedPatientId={setSelectedPatientId}
+          updatePatient={updatePatient} logAction={logAction} showToast={showToast}
+          audit={audit} goRole={goRole} resetDemoData={resetDemoData}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   LANDING / LOGIN
+   ============================================================ */
+function Landing({ onSelectRole, onStartDemo }) {
+  const roles = [
+    { id: "patient", label: "Patient", icon: User, desc: "Register, track your queue, view your prescription" },
+    { id: "nurse", label: "Nurse", icon: HeartPulse, desc: "Validate triage, manage the live queue" },
+    { id: "doctor", label: "Doctor", icon: Stethoscope, desc: "Consult with full pre-filled patient context" },
+    { id: "pharmacist", label: "Pharmacist", icon: Pill, desc: "Scan & verify e-prescriptions" },
+    { id: "admin", label: "Hospital Admin", icon: LayoutDashboard, desc: "Monitor flow, audit logs & analytics" },
+  ];
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-16" style={{ background: `radial-gradient(1200px 600px at 50% -10%, ${C.tealSoft}, ${C.bg})` }}>
+      <div className="w-full max-w-4xl mf-in">
+        <div className="flex items-center justify-center gap-2 mb-6">
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: C.navy }}>
+            <Activity size={18} color="#fff" strokeWidth={2.5} />
+          </div>
+          <span className="mf-display text-xl font-bold tracking-tight" style={{ color: C.navy }}>MedFlow</span>
+        </div>
+        <h1 className="mf-display text-center text-3xl md:text-4xl font-semibold leading-tight" style={{ color: C.navy }}>
+          From Triage to Treatment —<br />One Continuous Digital Patient Journey
+        </h1>
+        <p className="text-center mt-3 text-sm md:text-base" style={{ color: C.muted }}>
+          Protocol-Assisted Triage · Smart Priority Queue · Digital Prescription · Unified Patient Record
+        </p>
+        <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
+          <Badge tone="sky">Team vertexiQ</Badge>
+          <Badge tone="gray">PHCET</Badge>
+          <Badge tone="teal">SIH26133</Badge>
+          <Badge tone="gray">Smart India Hackathon 2026</Badge>
+        </div>
+
+        <div className="mt-10 grid grid-cols-2 md:grid-cols-5 gap-3">
+          {roles.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => onSelectRole(r.id)}
+              className="text-left rounded-2xl p-4 transition-all hover:-translate-y-0.5"
+              style={{ background: C.card, border: `1.5px solid ${C.border}`, boxShadow: "0 1px 2px rgba(11,46,51,0.05)" }}
+            >
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center mb-3" style={{ background: C.tealSoft }}>
+                <r.icon size={18} color={C.teal} strokeWidth={2.2} />
+              </div>
+              <div className="font-semibold text-sm" style={{ color: C.navy }}>{r.label}</div>
+              <div className="text-xs mt-1 leading-snug" style={{ color: C.muted }}>{r.desc}</div>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-8 flex flex-col items-center gap-3">
+          <Btn variant="coral" icon={Play} onClick={onStartDemo}>Start Patient Journey (Guided Demo)</Btn>
+          <p className="text-xs" style={{ color: C.faint }}>Walks through one full encounter, role by role, in ~2–3 minutes.</p>
+        </div>
+
+        <div className="mt-10 text-center text-xs" style={{ color: C.faint }}>
+          The system assists prioritization; qualified healthcare staff make the final clinical decision.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   APP SHELL — top bar, journey stepper, demo banner, side nav
+   ============================================================ */
+function AppShell(props) {
+  const { role, screen, setScreen, logout, offline, toggleOffline, syncing, language, setLanguage,
+    demo, nextDemo, prevDemo, exitDemo, demoScript, patients, p001, selectedPatientId, setSelectedPatientId,
+    updatePatient, logAction, showToast, audit, goRole, resetDemoData } = props;
+
+  const navConfig = {
+    patient: [
+      { key: "home", label: "Home", icon: Home },
+      { key: "registration", label: "Registration", icon: UserPlus },
+      { key: "symptoms", label: "Symptoms", icon: ClipboardList },
+      { key: "queue", label: "Queue", icon: ListOrdered },
+      { key: "prescription", label: "Prescription", icon: FileText },
+      { key: "record", label: "History", icon: History },
+    ],
+    nurse: [
+      { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { key: "triage", label: "Triage", icon: Activity },
+      { key: "samples", label: "Sample Patients", icon: Users },
+      { key: "queue", label: "Dynamic Queue", icon: ListOrdered },
+    ],
+    doctor: [
+      { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { key: "context", label: "Patient Context", icon: ClipboardCheck },
+      { key: "consultation", label: "Consultation", icon: Stethoscope },
+      { key: "prescription", label: "E-Prescription", icon: FileText },
+    ],
+    pharmacist: [
+      { key: "verify", label: "Scan / Verify", icon: ScanLine },
+      { key: "dispense", label: "Dispense", icon: Pill },
+    ],
+    admin: [
+      { key: "overview", label: "Hospital Overview", icon: LayoutDashboard },
+      { key: "queue", label: "Live Queue", icon: ListOrdered },
+      { key: "audit", label: "Audit Trail", icon: ScrollText },
+      { key: "security", label: "Security & Roles", icon: ShieldAlert },
+    ],
+  };
+  const items = navConfig[role] || [];
+  const roleLabel = { patient: "Patient", nurse: "Nurse", doctor: "Doctor", pharmacist: "Pharmacist", admin: "Hospital Admin" }[role];
+
+  const currentStageIdx = STAGES.findIndex((s) => s.key === p001.stage);
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      {/* Demo banner */}
+      {demo.active && (
+        <div className="w-full px-4 md:px-8 py-3" style={{ background: C.navyDeep }}>
+          <div className="max-w-7xl mx-auto flex items-center gap-4 flex-wrap">
+            <Badge tone="coral">DEMO MODE</Badge>
+            <div className="text-sm text-white/90 flex-1 min-w-[200px]">
+              <span className="font-semibold">Step {demo.step + 1}/{demoScript.length}:</span> {demoScript[demo.step]?.note}
+            </div>
+            <div className="flex items-center gap-2">
+              <Btn variant="ghost" icon={ChevronLeft} onClick={prevDemo} disabled={demo.step <= 0} className="!text-white/80 !px-2">Back</Btn>
+              {demo.step < demoScript.length - 1 ? (
+                <Btn variant="coral" icon={ArrowRight} onClick={nextDemo}>Next Step</Btn>
+              ) : (
+                <Btn variant="subtle" icon={CheckCircle2} onClick={exitDemo}>Journey Complete</Btn>
+              )}
+              <Btn variant="ghost" icon={X} onClick={exitDemo} className="!text-white/60 !px-2">Exit</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top bar */}
+      <div className="w-full border-b sticky top-0 z-30" style={{ background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)", borderColor: C.border }}>
+        <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.navy }}>
+              <Activity size={16} color="#fff" strokeWidth={2.5} />
+            </div>
+            <span className="mf-display font-bold text-lg" style={{ color: C.navy }}>MedFlow</span>
+          </div>
+          <Badge tone="gray">{roleLabel} Portal</Badge>
+
+          <div className="flex-1" />
+
+          {role === "patient" && (
+            <button onClick={() => setLanguage(language === "English" ? "हिंदी" : language === "हिंदी" ? "मराठी" : "English")}
+              className="flex items-center gap-1.5 text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: C.skySoft, color: C.sky }}>
+              <Languages size={13} /> {language}
+            </button>
+          )}
+
+          <button onClick={toggleOffline} className="flex items-center gap-1.5 text-xs font-semibold rounded-full px-3 py-1.5"
+            style={{ background: offline ? C.coralSoft : C.greenSoft, color: offline ? C.coral : C.green }}>
+            {offline ? <WifiOff size={13} /> : <Wifi size={13} />}
+            {syncing ? "Syncing…" : offline ? "Offline Mode" : "Online"}
+          </button>
+
+          {!demo.active && (
+            <Btn variant="subtle" icon={Play} onClick={() => { goRole("patient"); }} className="!hidden md:!inline-flex" />
+          )}
+
+          <button onClick={resetDemoData} className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: C.muted }}>
+            <RefreshCw size={13} /> Reset Demo
+          </button>
+          <button onClick={logout} className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: C.muted }}>
+            <LogOut size={14} /> Switch Role
+          </button>
+        </div>
+
+        {/* Journey stepper */}
+        <div className="max-w-7xl mx-auto px-4 md:px-8 pb-3 overflow-x-auto mf-scroll">
+          <div className="flex items-center gap-1 min-w-max">
+            {STAGES.map((s, i) => {
+              const active = i === currentStageIdx;
+              const done = i < currentStageIdx || (currentStageIdx === -1 && false);
+              const reached = currentStageIdx >= 0 && i <= currentStageIdx;
+              return (
+                <React.Fragment key={s.key}>
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap"
+                    style={{
+                      background: active ? C.navy : reached ? C.tealSoft : "transparent",
+                      color: active ? "#fff" : reached ? C.teal : C.faint,
+                    }}>
+                    <s.icon size={12} /> {s.label}
+                  </div>
+                  {i < STAGES.length - 1 && <div className="w-3 h-px" style={{ background: C.border }} />}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto w-full flex flex-1 px-4 md:px-8 gap-6 py-6">
+        {/* Side nav */}
+        <div className="hidden md:flex flex-col gap-1 w-56 shrink-0">
+          {items.map((it) => (
+            <button key={it.key} onClick={() => setScreen(it.key)}
+              className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-left transition-colors"
+              style={{ background: screen === it.key ? C.tealSoft : "transparent", color: screen === it.key ? C.teal : C.muted }}>
+              <it.icon size={16} strokeWidth={2.2} /> {it.label}
+            </button>
+          ))}
+          <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${C.border}` }}>
+            <div className="text-xs font-semibold flex items-center gap-1.5" style={{ color: C.faint }}>
+              <Lock size={12} /> Role-based access
+            </div>
+            <p className="text-xs mt-1 leading-snug" style={{ color: C.faint }}>
+              You can only view data authorized for the {roleLabel} role.
+            </p>
+          </div>
+        </div>
+
+        {/* mobile nav */}
+        <div className="md:hidden flex gap-2 overflow-x-auto mf-scroll pb-2 -mt-2 fixed bottom-0 left-0 right-0 bg-white border-t z-30 px-3 py-2" style={{ borderColor: C.border }}>
+          {items.map((it) => (
+            <button key={it.key} onClick={() => setScreen(it.key)}
+              className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[10px] font-semibold shrink-0"
+              style={{ background: screen === it.key ? C.tealSoft : "transparent", color: screen === it.key ? C.teal : C.muted }}>
+              <it.icon size={16} /> {it.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Main content */}
+        <div className="flex-1 min-w-0 pb-16 md:pb-0 mf-in" key={role + screen}>
+          <ScreenRouter {...props} navSetScreen={setScreen} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   SCREEN ROUTER
+   ============================================================ */
+function ScreenRouter(props) {
+  const { role, screen } = props;
+  if (role === "patient") {
+    if (screen === "home") return <PatientHome {...props} />;
+    if (screen === "registration") return <PatientRegistration {...props} />;
+    if (screen === "symptoms") return <PatientSymptoms {...props} />;
+    if (screen === "queue") return <PatientQueue {...props} />;
+    if (screen === "prescription") return <PatientPrescription {...props} />;
+    if (screen === "record") return <PatientRecord {...props} />;
+  }
+  if (role === "nurse") {
+    if (screen === "dashboard") return <NurseDashboard {...props} />;
+    if (screen === "triage") return <TriageAssessment {...props} />;
+    if (screen === "samples") return <SamplePatients {...props} />;
+    if (screen === "queue") return <DynamicQueue {...props} />;
+  }
+  if (role === "doctor") {
+    if (screen === "dashboard") return <DoctorDashboard {...props} />;
+    if (screen === "context") return <DoctorContext {...props} />;
+    if (screen === "consultation") return <DoctorConsultation {...props} />;
+    if (screen === "prescription") return <EPrescription {...props} />;
+  }
+  if (role === "pharmacist") {
+    if (screen === "verify") return <PharmacyVerify {...props} />;
+    if (screen === "dispense") return <PharmacyDispense {...props} />;
+  }
+  if (role === "admin") {
+    if (screen === "overview") return <AdminOverview {...props} />;
+    if (screen === "queue") return <DynamicQueue {...props} />;
+    if (screen === "audit") return <AuditTrail {...props} />;
+    if (screen === "security") return <SecurityScreen {...props} />;
+  }
+  return <div>Screen not found.</div>;
+}
+
+/* ============================================================
+   PATIENT SCREENS
+   ============================================================ */
+function PatientHome({ p001, navSetScreen }) {
+  const stageDone = (k) => STAGES.findIndex((s) => s.key === p001.stage) >= STAGES.findIndex((s) => s.key === k);
+  return (
+    <div>
+      <SectionLabel eyebrow="Patient Portal" title={`Welcome${p001.registeredAt ? ", " + p001.name.split(" ")[0] : ""}`}
+        sub="Register once — your information carries through every step of your visit." />
+      <div className="grid md:grid-cols-3 gap-4">
+        <Card>
+          <UserPlus size={18} color={C.teal} />
+          <div className="font-semibold text-sm mt-2" style={{ color: C.navy }}>1. Register</div>
+          <p className="text-xs mt-1" style={{ color: C.muted }}>Share your details once at reception.</p>
+          <div className="mt-3"><Btn variant={p001.registeredAt ? "subtle" : "primary"} onClick={() => navSetScreen("registration")}>
+            {p001.registeredAt ? "View Registration" : "Register Now"}
+          </Btn></div>
+        </Card>
+        <Card>
+          <ClipboardList size={18} color={C.teal} />
+          <div className="font-semibold text-sm mt-2" style={{ color: C.navy }}>2. Symptoms</div>
+          <p className="text-xs mt-1" style={{ color: C.muted }}>Tell us what's bothering you, in your own words.</p>
+          <div className="mt-3"><Btn variant={stageDone("symptoms") ? "subtle" : "outline"} disabled={!p001.registeredAt} onClick={() => navSetScreen("symptoms")}>
+            {stageDone("symptoms") ? "View Details" : "Add Symptoms"}
+          </Btn></div>
+        </Card>
+        <Card>
+          <ListOrdered size={18} color={C.teal} />
+          <div className="font-semibold text-sm mt-2" style={{ color: C.navy }}>3. Track Queue</div>
+          <p className="text-xs mt-1" style={{ color: C.muted }}>See your live position and wait time.</p>
+          <div className="mt-3"><Btn variant="outline" disabled={!stageDone("triage")} onClick={() => navSetScreen("queue")}>Check Status</Btn></div>
+        </Card>
+      </div>
+
+      <div className="mt-4">
+        <Card style={{ background: C.tealSoft, border: "none" }}>
+          <div className="flex items-start gap-3">
+            <ShieldCheck size={20} color={C.teal} className="mt-0.5 shrink-0" />
+            <p className="text-sm" style={{ color: C.teal }}>
+              <span className="font-semibold">The system assists prioritization; qualified healthcare staff make the final clinical decision.</span> All patient information in this prototype is fictional and for demonstration purposes only.
+            </p>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function PatientRegistration({ p001, updatePatient, logAction, navSetScreen, showToast }) {
+  const [form, setForm] = useState({
+    name: p001.name, age: p001.age, gender: p001.gender, mobile: "9876543210",
+    address: p001.address, language: p001.language, newOrExisting: p001.newOrExisting,
+    history: p001.history, emergencyContact: p001.emergencyContact,
+  });
+  const submitted = !!p001.registeredAt;
+
+  const submit = () => {
+    updatePatient("P001", { ...form, registeredAt: nowTime(), stage: "registration" });
+    logAction("Patient registered — Reception", "Reception");
+    showToast(`Patient ID P001 · Encounter ${p001.encounterId} generated`);
+  };
+
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 1" title="Patient Registration" sub="Captured once — flows automatically to every later stage." />
+      <Card>
+        <div className="grid md:grid-cols-2 gap-4">
+          <Field label="Full Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={submitted} /></Field>
+          <Field label="Age"><Input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} disabled={submitted} /></Field>
+          <Field label="Gender">
+            <Select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} disabled={submitted}>
+              <option>Male</option><option>Female</option><option>Other</option>
+            </Select>
+          </Field>
+          <Field label="Mobile Number"><Input value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} disabled={submitted} /></Field>
+          <Field label="Address / Location"><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} disabled={submitted} /></Field>
+          <Field label="Preferred Language">
+            <Select value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })} disabled={submitted}>
+              <option>English</option><option>हिंदी</option><option>मराठी</option>
+            </Select>
+          </Field>
+          <Field label="New / Existing Patient">
+            <Select value={form.newOrExisting} onChange={(e) => setForm({ ...form, newOrExisting: e.target.value })} disabled={submitted}>
+              <option>New</option><option>Existing</option>
+            </Select>
+          </Field>
+          <Field label="Emergency Contact"><Input value={form.emergencyContact} onChange={(e) => setForm({ ...form, emergencyContact: e.target.value })} disabled={submitted} /></Field>
+          <div className="md:col-span-2">
+            <Field label="Relevant Medical History (optional)">
+              <TextArea rows={2} value={form.history} onChange={(e) => setForm({ ...form, history: e.target.value })} disabled={submitted} />
+            </Field>
+          </div>
+        </div>
+
+        {!submitted ? (
+          <div className="mt-5"><Btn icon={UserPlus} onClick={submit}>Register Patient</Btn></div>
+        ) : (
+          <div className="mt-5 flex items-center gap-3 flex-wrap">
+            <Card pad="p-3" style={{ background: C.greenSoft, border: "none" }}>
+              <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.green }}>
+                <CheckCircle2 size={16} /> Registered at {p001.registeredAt}
+              </div>
+            </Card>
+            <Badge tone="gray">Patient ID: {p001.id}</Badge>
+            <Badge tone="sky">Encounter ID: {p001.encounterId}</Badge>
+            <Btn variant="outline" icon={ArrowRight} onClick={() => navSetScreen("symptoms")}>Continue to Symptoms</Btn>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function PatientSymptoms({ p001, updatePatient, logAction, navSetScreen, showToast }) {
+  const [form, setForm] = useState({
+    complaint: p001.symptoms?.complaint || "", list: p001.symptoms?.list || "",
+    duration: p001.symptoms?.duration || "", relevantHistory: p001.symptoms?.relevantHistory || "",
+    bp: p001.vitals?.bp || "", pulse: p001.vitals?.pulse || "", spo2: p001.vitals?.spo2 || "", temp: p001.vitals?.temp || "",
+  });
+  const submitted = !!p001.symptoms;
+
+  const submit = () => {
+    updatePatient("P001", {
+      symptoms: { complaint: form.complaint, list: form.list, duration: form.duration, relevantHistory: form.relevantHistory },
+      vitals: { bp: form.bp, pulse: form.pulse, spo2: form.spo2, temp: form.temp },
+      stage: "symptoms",
+    });
+    logAction("Symptoms & vitals captured — Reception", "Reception");
+    showToast("Symptoms saved — ready for triage");
+  };
+
+  if (!p001.registeredAt) return <EmptyState title="Complete registration first" body="Symptoms can be captured once the patient is registered." />;
+
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 2" title="Symptoms & Basic Information" sub="Plain language — no medical jargon required from the patient." />
+      <Card>
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="md:col-span-2"><Field label="Main Complaint"><TextArea rows={2} placeholder="What's bothering you most?" value={form.complaint} onChange={(e) => setForm({ ...form, complaint: e.target.value })} disabled={submitted} /></Field></div>
+          <Field label="Other Symptoms"><Input value={form.list} onChange={(e) => setForm({ ...form, list: e.target.value })} disabled={submitted} placeholder="e.g. cough, chills, fatigue" /></Field>
+          <Field label="Duration"><Input value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} disabled={submitted} placeholder="e.g. since yesterday" /></Field>
+          <div className="md:col-span-2"><Field label="Relevant History"><TextArea rows={2} value={form.relevantHistory} onChange={(e) => setForm({ ...form, relevantHistory: e.target.value })} disabled={submitted} /></Field></div>
+        </div>
+
+        <div className="mt-5 pt-5" style={{ borderTop: `1px dashed ${C.border}` }}>
+          <div className="text-xs font-semibold mb-3 flex items-center gap-1.5" style={{ color: C.muted }}>
+            <HeartPulse size={14} /> BASIC OBSERVATIONS (entered by reception/nurse)
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="Blood Pressure"><Input value={form.bp} onChange={(e) => setForm({ ...form, bp: e.target.value })} disabled={submitted} placeholder="e.g. 120/80" /></Field>
+            <Field label="Pulse"><Input value={form.pulse} onChange={(e) => setForm({ ...form, pulse: e.target.value })} disabled={submitted} placeholder="e.g. 88 bpm" /></Field>
+            <Field label="SpO₂"><Input value={form.spo2} onChange={(e) => setForm({ ...form, spo2: e.target.value })} disabled={submitted} placeholder="e.g. 97%" /></Field>
+            <Field label="Temperature"><Input value={form.temp} onChange={(e) => setForm({ ...form, temp: e.target.value })} disabled={submitted} placeholder="e.g. 37.0°C" /></Field>
+          </div>
+        </div>
+
+        {!submitted ? (
+          <div className="mt-5"><Btn icon={ClipboardList} onClick={submit}>Save Symptoms & Vitals</Btn></div>
+        ) : (
+          <div className="mt-5 flex items-center gap-3 flex-wrap">
+            <Card pad="p-3" style={{ background: C.greenSoft, border: "none" }}>
+              <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.green }}><CheckCircle2 size={16} /> Saved — sent for triage review</div>
+            </Card>
+            <Btn variant="outline" icon={ArrowRight} onClick={() => navSetScreen("queue")}>Check Queue Status</Btn>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function PatientQueue({ p001, navSetScreen }) {
+  if (!p001.symptoms) return <EmptyState title="Not yet in queue" body="Your queue position appears once symptoms are captured and triage begins." />;
+  const validated = !!p001.triage?.validation;
+  const tone = priorityTone(p001.triage?.finalPriority || p001.triage?.systemRec || "Routine");
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 3" title="Your Queue Status" sub="Live position — recalculated automatically as clinical priority is confirmed." />
+      <Card>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <div className="text-xs font-semibold" style={{ color: C.faint }}>PATIENT</div>
+            <div className="mf-display text-lg font-semibold" style={{ color: C.navy }}>{p001.name} · {p001.id}</div>
+            <div className="text-xs mt-0.5" style={{ color: C.muted }}>Encounter {p001.encounterId}</div>
+          </div>
+          {validated ? (
+            <div className="text-right">
+              <div className="text-xs font-semibold" style={{ color: C.faint }}>QUEUE POSITION</div>
+              <div className="mf-display text-4xl font-bold" style={{ color: C.navy }}>#{p001.queuePos}</div>
+            </div>
+          ) : (
+            <Badge tone="amber">Awaiting Triage Validation</Badge>
+          )}
+        </div>
+
+        <div className="mt-5 grid md:grid-cols-2 gap-3">
+          <Card pad="p-3" style={{ background: C.bg }}>
+            <div className="text-xs font-semibold" style={{ color: C.faint }}>STATUS</div>
+            <div className="text-sm font-semibold mt-1" style={{ color: C.navy }}>
+              {validated ? "Waiting for Consultation" : "System recommendation under nurse review"}
+            </div>
+          </Card>
+          <Card pad="p-3" style={{ background: C.bg }}>
+            <div className="text-xs font-semibold" style={{ color: C.faint }}>PRIORITY (after validation)</div>
+            <div className="mt-1">{validated ? <Badge tone={tone}>{p001.triage.finalPriority}</Badge> : <span className="text-xs" style={{ color: C.muted }}>Pending</span>}</div>
+          </Card>
+        </div>
+
+        {validated && (
+          <Card pad="p-3" className="mt-3" style={{ background: C.skySoft, border: "none" }}>
+            <div className="text-xs" style={{ color: C.sky }}>
+              <span className="font-semibold">Estimated wait:</span> ~12 minutes · Recalculated in real time as priorities shift for other patients.
+            </div>
+          </Card>
+        )}
+
+        <div className="mt-4"><Btn variant="outline" icon={ArrowRight} onClick={() => navSetScreen("prescription")}>View Prescription (after consultation)</Btn></div>
+      </Card>
+    </div>
+  );
+}
+
+function PatientPrescription({ p001 }) {
+  if (!p001.prescription) return <EmptyState title="No prescription yet" body="Your e-prescription will appear here right after your doctor's consultation." />;
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 4" title="Your Prescription" sub="Delivered digitally the moment your doctor generates it." />
+      <PrescriptionCard p={p001} />
+    </div>
+  );
+}
+
+function PatientRecord({ p001 }) {
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 4b" title="Visit History & Records" sub="Every encounter, connected — nothing fragmented across departments." />
+      <div className="space-y-3">
+        {p001.stage && STAGES.findIndex(s=>s.key===p001.stage) >= STAGES.findIndex(s=>s.key==="record") && (
+          <Card>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Badge tone="green">Today</Badge>
+                <span className="font-semibold text-sm" style={{ color: C.navy }}>{p001.encounterId} · Dr. {p001.prescription?.doctor?.replace("Dr. ", "")}</span>
+              </div>
+              <Badge tone="gray">Completed</Badge>
+            </div>
+            <p className="text-sm mt-2" style={{ color: C.muted }}>{p001.consult?.assessment}. {p001.consult?.followUp}</p>
+          </Card>
+        )}
+        {p001.pastVisits.map((v) => (
+          <Card key={v.encounterId}>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Badge tone="gray">{v.date}</Badge>
+                <span className="font-semibold text-sm" style={{ color: C.navy }}>{v.encounterId} · {v.doctor}</span>
+              </div>
+            </div>
+            <p className="text-sm mt-2" style={{ color: C.muted }}>{v.summary}</p>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TRIAGE MODULE (Nurse)
+   ============================================================ */
+function TriageAssessment({ p001, updatePatient, logAction, showToast, navSetScreen }) {
+  const [note, setNote] = useState("");
+  const [finalPriorityChoice, setFinalPriorityChoice] = useState(p001.triage?.systemRec || "Urgent");
+  if (!p001.symptoms) return <EmptyState title="Awaiting patient data" body="Triage assessment activates once symptoms & vitals are captured." />;
+
+  const generateRec = () => {
+    updatePatient("P001", { triage: { systemRec: "Urgent", protocol: "ESI (Emergency Severity Index) — configured for demo", validation: null, finalPriority: null }, stage: "triage" });
+    logAction("Priority recommendation generated — System", "System");
+  };
+
+  const validate = (action) => {
+    if ((action === "Modify" || action === "Override") && !note.trim()) {
+      showToast("Add a clinical reason before changing the recommendation");
+      return;
+    }
+    const finalPriority = action === "Accept" ? p001.triage.systemRec : finalPriorityChoice;
+    updatePatient("P001", {
+      triage: { ...p001.triage, validation: { status: action, note: note.trim() || "Accepted as recommended.", by: "Nurse Kavita Rao", at: nowTime() }, finalPriority },
+      queuePos: finalPriority === "Emergent" ? 1 : finalPriority === "Urgent" ? 2 : 3, stage: "queue",
+    });
+    logAction(`Recommendation ${action.toLowerCase()}d — Nurse Kavita Rao`, "Nurse");
+    showToast(`Priority ${action.toLowerCase()}d — queue updated`);
+  };
+
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 5" title="Triage Assessment" sub="Patient Data → Protocol → System Recommendation → Nurse Validation." />
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card>
+          <div className="text-xs font-semibold mb-3" style={{ color: C.faint }}>PATIENT DATA</div>
+          <dl className="space-y-2 text-sm">
+            <Row k="Patient ID" v={p001.id} /><Row k="Age" v={p001.age} />
+            <Row k="Main complaint" v={p001.symptoms.complaint} />
+            <Row k="Duration" v={p001.symptoms.duration} />
+            <Row k="History" v={p001.symptoms.relevantHistory} />
+            <Row k="BP" v={p001.vitals.bp} /><Row k="Pulse" v={p001.vitals.pulse} />
+            <Row k="SpO₂" v={p001.vitals.spo2} /><Row k="Temp" v={p001.vitals.temp} />
+          </dl>
+        </Card>
+
+        <div className="space-y-4">
+          <Card>
+            <div className="text-xs font-semibold mb-2" style={{ color: C.faint }}>PROTOCOL / RULE</div>
+            <p className="text-sm" style={{ color: C.muted }}>ESI (Emergency Severity Index) — configured for demonstration. Not a proprietary AI diagnosis.</p>
+            {!p001.triage ? (
+              <div className="mt-3"><Btn icon={Activity} onClick={generateRec}>Generate System Recommendation</Btn></div>
+            ) : (
+              <div className="mt-3 flex items-center gap-2">
+                <Badge tone={priorityTone(p001.triage.systemRec)}>{p001.triage.systemRec}</Badge>
+                <span className="text-xs" style={{ color: C.faint }}>System recommendation — not final</span>
+              </div>
+            )}
+          </Card>
+
+          {p001.triage && !p001.triage.validation && (
+            <Card style={{ border: `1.5px solid ${C.sky}` }}>
+              <div className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: C.sky }}><ShieldCheck size={14} /> NURSE VALIDATION</div>
+              <TextArea rows={2} placeholder="Clinical reason / validation note (required for Modify or Override)" value={note} onChange={(e) => setNote(e.target.value)} />
+              <div className="mt-3 flex items-end gap-2 flex-wrap">
+                <Field label="Final priority if modified/overridden">
+                  <Select value={finalPriorityChoice} onChange={(e) => setFinalPriorityChoice(e.target.value)} style={{ minWidth: 150 }}>
+                    <option>Emergent</option><option>Urgent</option><option>Routine</option>
+                  </Select>
+                </Field>
+              </div>
+              <div className="mt-3 flex gap-2 flex-wrap">
+                <Btn variant="primary" icon={CheckCircle2} onClick={() => validate("Accept")}>Accept</Btn>
+                <Btn variant="sky" icon={ClipboardCheck} onClick={() => validate("Modify")}>Modify</Btn>
+                <Btn variant="coral" icon={AlertTriangle} onClick={() => validate("Override")}>Override</Btn>
+              </div>
+            </Card>
+          )}
+
+          {p001.triage?.validation && (
+            <Card style={{ background: C.greenSoft, border: "none" }}>
+              <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.green }}><CheckCircle2 size={16} /> {p001.triage.validation.status}ed by {p001.triage.validation.by} at {p001.triage.validation.at}</div>
+              <div className="mt-2"><Badge tone={priorityTone(p001.triage.finalPriority)}>Final Priority: {p001.triage.finalPriority}</Badge></div>
+              <div className="mt-3"><Btn variant="outline" icon={ArrowRight} onClick={() => navSetScreen("queue")}>View Dynamic Queue</Btn></div>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Row({ k, v }) {
+  return (
+    <div className="flex justify-between gap-3 py-1" style={{ borderBottom: `1px dashed ${C.border}` }}>
+      <dt style={{ color: C.faint }}>{k}</dt><dd className="text-right font-medium" style={{ color: C.text }}>{v || "—"}</dd>
+    </div>
+  );
+}
+
+function SamplePatients() {
+  const seed = seedPatients();
+  const list = [seed.PA, seed.PB, seed.PC];
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 5b" title="Three Sample Patients" sub="Demonstration data — not for clinical use." />
+      <div className="grid md:grid-cols-3 gap-4">
+        {list.map((pt) => (
+          <Card key={pt.id}>
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-sm" style={{ color: C.navy }}>{pt.name}</span>
+              <Badge tone={priorityTone(pt.finalPriority)}>{pt.esi.split("—")[1].trim()}</Badge>
+            </div>
+            <div className="text-xs mt-1" style={{ color: C.faint }}>{pt.age} yrs · {pt.gender}</div>
+            <div className="mt-3 space-y-2 text-xs">
+              <div><span className="font-semibold" style={{ color: C.faint }}>Presentation: </span><span style={{ color: C.text }}>{pt.presentation}</span></div>
+              <div><span className="font-semibold" style={{ color: C.faint }}>System recommends: </span><span style={{ color: C.text }}>{pt.systemRec}</span></div>
+              <div><span className="font-semibold" style={{ color: C.faint }}>Nurse action: </span><span style={{ color: C.text }}>{pt.nurseAction}</span></div>
+            </div>
+          </Card>
+        ))}
+      </div>
+      <Card className="mt-4" style={{ background: C.amberSoft, border: "none" }}>
+        <p className="text-xs font-semibold" style={{ color: "#8A5B14" }}>Demonstration data – not for clinical use. All thresholds shown are configured for this prototype only.</p>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   NURSE DASHBOARD & QUEUE
+   ============================================================ */
+function NurseDashboard({ p001, navSetScreen }) {
+  const rows = [
+    { token: "T-14", patient: p001.name || "—", priority: p001.triage?.finalPriority || p001.triage?.systemRec || "—", status: p001.triage?.validation ? "Validated" : p001.symptoms ? "Pending Validation" : "Awaiting Symptoms" },
+    { token: "T-15", patient: "Patient B (sample)", priority: "Urgent", status: "Validated" },
+    { token: "T-16", patient: "Patient C (sample)", priority: "Less Urgent", status: "Validated" },
+  ];
+  const stats = [
+    { label: "Total Waiting", value: 3, icon: Users },
+    { label: "Pending Validation", value: p001.triage && !p001.triage.validation ? 1 : 0, icon: Clock },
+    { label: "Priority Patients", value: 1, icon: AlertTriangle },
+    { label: "Completed Today", value: 12, icon: CheckCircle2 },
+  ];
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 6" title="Nurse Dashboard" sub="Everything awaiting clinical validation, in one view." />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        {stats.map((s) => (
+          <Card key={s.label} pad="p-4">
+            <s.icon size={16} color={C.teal} />
+            <div className="mf-display text-2xl font-bold mt-2" style={{ color: C.navy }}>{s.value}</div>
+            <div className="text-xs mt-0.5" style={{ color: C.muted }}>{s.label}</div>
+          </Card>
+        ))}
+      </div>
+      <Card pad="p-0">
+        <div className="overflow-x-auto mf-scroll">
+          <table className="w-full text-sm">
+            <thead><tr style={{ background: C.bg }}>
+              {["Token", "Patient", "Priority", "Status", "Action"].map((h) => (
+                <th key={h} className="text-left px-4 py-3 text-xs font-semibold" style={{ color: C.faint }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.token} style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td className="px-4 py-3 font-medium" style={{ color: C.navy }}>{r.token}</td>
+                  <td className="px-4 py-3">{r.patient}</td>
+                  <td className="px-4 py-3">{r.priority !== "—" ? <Badge tone={priorityTone(r.priority)}>{r.priority}</Badge> : "—"}</td>
+                  <td className="px-4 py-3">{r.status}</td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => navSetScreen("triage")} className="text-xs font-semibold" style={{ color: C.sky }}>View →</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function DynamicQueue({ p001 }) {
+  const base = [
+    { pos: 1, name: "Patient A (sample)", priority: "Emergent", note: "Moved from position 7 after validated priority increase", moved: true },
+    { pos: 2, name: p001.triage?.validation ? p001.name : "Patient B (sample)", priority: p001.triage?.validation ? p001.triage.finalPriority : "Urgent" },
+    { pos: 3, name: "Patient C (sample)", priority: "Less Urgent" },
+  ];
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 7" title="Smart / Dynamic Queue" sub="Arranged by validated clinical priority — not arrival order." />
+      <div className="space-y-3">
+        {base.map((r) => (
+          <Card key={r.pos} pad="p-4" className="flex items-center gap-4" style={{ display: "flex" }}>
+            <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0" style={{ background: C.navy, color: "#fff" }}>#{r.pos}</div>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-sm" style={{ color: C.navy }}>{r.name}</div>
+              {r.moved && (
+                <div className="text-xs mt-0.5 flex items-center gap-1" style={{ color: C.coral }}>
+                  <AlertTriangle size={11} /> Was #7 → clinical staff validated higher priority → moved here
+                </div>
+              )}
+            </div>
+            <Badge tone={priorityTone(r.priority)}>{r.priority}</Badge>
+          </Card>
+        ))}
+      </div>
+      <Card className="mt-4" style={{ background: C.skySoft, border: "none" }}>
+        <p className="text-xs font-semibold" style={{ color: C.sky }}>Final queue position is based on validated clinical priority. Human override is always available to authorized healthcare staff.</p>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   DOCTOR SCREENS
+   ============================================================ */
+function DoctorDashboard({ p001, navSetScreen }) {
+  const ready = !!p001.triage?.validation;
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 8" title="Doctor Dashboard" sub="Patients ready for consultation, ordered by validated priority." />
+      <div className="grid md:grid-cols-2 gap-4">
+        {ready && (
+          <Card style={{ border: `1.5px solid ${C.sky}` }} className="cursor-pointer" onClick={() => navSetScreen("context")}>
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-sm" style={{ color: C.navy }}>{p001.name} · {p001.id}</span>
+              <Badge tone={priorityTone(p001.triage.finalPriority)}>{p001.triage.finalPriority}</Badge>
+            </div>
+            <div className="text-xs mt-1" style={{ color: C.faint }}>{p001.age} yrs · {p001.symptoms.complaint}</div>
+            <div className="mt-3 flex items-center gap-2">
+              <Badge tone="green">Validated</Badge>
+              <span className="text-xs" style={{ color: C.faint }}>Waiting</span>
+            </div>
+            <div className="mt-3"><Btn variant="sky" icon={ArrowRight}>Open Patient Context</Btn></div>
+          </Card>
+        )}
+        <Card style={{ opacity: 0.55 }}>
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-sm" style={{ color: C.navy }}>Patient B (sample)</span>
+            <Badge tone="amber">Urgent</Badge>
+          </div>
+          <div className="text-xs mt-1" style={{ color: C.faint }}>27 yrs · Fever, cough</div>
+        </Card>
+        {!ready && <EmptyState title="No patients ready yet" body="Patients appear here once nurse validation is complete." />}
+      </div>
+    </div>
+  );
+}
+
+function DoctorContext({ p001, navSetScreen }) {
+  if (!p001.triage?.validation) return <EmptyState title="No validated patient yet" body="Open a patient from the Doctor Dashboard once triage validation is complete." />;
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 9" title="Patient Context" sub="Everything captured upstream — the doctor never starts from zero." />
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card>
+          <CtxHeader icon={User} label="Patient Information" />
+          <dl className="space-y-1.5 text-sm mt-2">
+            <Row k="Name" v={p001.name} /><Row k="Age / Gender" v={`${p001.age} / ${p001.gender}`} />
+            <Row k="Patient ID" v={p001.id} /><Row k="Encounter ID" v={p001.encounterId} />
+          </dl>
+        </Card>
+        <Card>
+          <CtxHeader icon={ClipboardList} label="Patient Reported" />
+          <dl className="space-y-1.5 text-sm mt-2">
+            <Row k="Main complaint" v={p001.symptoms.complaint} /><Row k="Duration" v={p001.symptoms.duration} />
+          </dl>
+        </Card>
+        <Card>
+          <CtxHeader icon={HeartPulse} label="Nurse/Staff Validated" />
+          <dl className="space-y-1.5 text-sm mt-2">
+            <Row k="BP" v={p001.vitals.bp} /><Row k="Pulse" v={p001.vitals.pulse} />
+            <Row k="SpO₂" v={p001.vitals.spo2} /><Row k="Temp" v={p001.vitals.temp} />
+            <Row k="History" v={p001.symptoms.relevantHistory} />
+          </dl>
+        </Card>
+        <Card>
+          <CtxHeader icon={Activity} label="Triage" />
+          <dl className="space-y-1.5 text-sm mt-2">
+            <Row k="System recommendation" v={p001.triage.systemRec} />
+            <Row k="Protocol used" v={p001.triage.protocol} />
+            <Row k="Nurse validation" v={`${p001.triage.validation.status} by ${p001.triage.validation.by}`} />
+            <Row k="Final priority" v={p001.triage.finalPriority} />
+          </dl>
+        </Card>
+        <Card className="lg:col-span-2">
+          <CtxHeader icon={History} label="Previous Relevant Encounter" />
+          {p001.pastVisits.map((v) => (
+            <p key={v.encounterId} className="text-sm mt-2" style={{ color: C.muted }}>
+              <span className="font-semibold" style={{ color: C.navy }}>{v.date} · {v.doctor}: </span>{v.summary}
+            </p>
+          ))}
+        </Card>
+      </div>
+      <div className="mt-4"><Btn icon={ArrowRight} onClick={() => navSetScreen("consultation")}>Begin Consultation</Btn></div>
+    </div>
+  );
+}
+
+function CtxHeader({ icon: Icon, label }) {
+  return (
+    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide" style={{ color: C.sky }}>
+      <Icon size={13} /> {label}
+    </div>
+  );
+}
+
+function DoctorConsultation({ p001, updatePatient, logAction, navSetScreen, showToast }) {
+  const [form, setForm] = useState({
+    notes: p001.consult?.notes || "", assessment: p001.consult?.assessment || "", followUp: p001.consult?.followUp || "",
+  });
+  const saved = !!p001.consult;
+  if (!p001.triage?.validation) return <EmptyState title="Open patient context first" body="Consultation begins after reviewing patient context." />;
+
+  const save = () => {
+    updatePatient("P001", { consult: form });
+    logAction("Consultation notes saved — Dr. S. Ansari", "Doctor");
+    showToast("Consultation saved");
+  };
+
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 10" title="Doctor Consultation" sub="Structured notes — no autonomous diagnosis suggestions." />
+      <Card>
+        <div className="space-y-4">
+          <Field label="Clinical Notes"><TextArea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} disabled={saved} /></Field>
+          <Field label="Assessment"><Input value={form.assessment} onChange={(e) => setForm({ ...form, assessment: e.target.value })} disabled={saved} /></Field>
+          <Field label="Follow-up Instructions"><TextArea rows={2} value={form.followUp} onChange={(e) => setForm({ ...form, followUp: e.target.value })} disabled={saved} /></Field>
+        </div>
+        <div className="mt-5 flex gap-2 flex-wrap">
+          {!saved ? <Btn icon={ClipboardCheck} onClick={save}>Save Consultation</Btn> :
+            <Btn variant="outline" icon={ArrowRight} onClick={() => navSetScreen("prescription")}>Create Prescription</Btn>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function EPrescription({ p001, updatePatient, logAction, navSetScreen, showToast }) {
+  const [items, setItems] = useState(p001.prescription?.items || [{ name: "", strength: "", dosage: "", frequency: "", duration: "", instructions: "" }]);
+  const generated = !!p001.prescription;
+  if (!p001.consult) return <EmptyState title="Complete consultation first" body="The e-prescription connects to consultation notes and the patient encounter." />;
+
+  const updateItem = (i, field, val) => setItems((its) => its.map((it, idx) => idx === i ? { ...it, [field]: val } : it));
+  const addItem = () => setItems((its) => [...its, { name: "", strength: "", dosage: "", frequency: "", duration: "", instructions: "" }]);
+
+  const generate = () => {
+    const cleanItems = items.filter((it) => it.name.trim());
+    if (!cleanItems.length) {
+      showToast("Add at least one medicine before generating the prescription");
+      return;
+    }
+    const qrId = "RX-MF-" + Math.floor(70000 + Math.random() * 9999);
+    updatePatient("P001", { prescription: { doctor: "Dr. S. Ansari", datetime: nowTime(), qrId, items: cleanItems }, stage: "prescription" });
+    logAction(`Structured prescription generated (${qrId}) — Dr. S. Ansari`, "Doctor");
+    showToast("Prescription generated & linked to encounter");
+  };
+
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 11" title="Structured E-Prescription" sub="Stays permanently linked to Patient ID + Encounter ID." />
+      {!generated ? (
+        <Card>
+          <div className="space-y-3">
+            {items.map((it, i) => (
+              <div key={i} className="grid grid-cols-2 md:grid-cols-6 gap-2 pb-3" style={{ borderBottom: `1px dashed ${C.border}` }}>
+                <Input placeholder="Medicine" value={it.name} onChange={(e) => updateItem(i, "name", e.target.value)} />
+                <Input placeholder="Strength" value={it.strength} onChange={(e) => updateItem(i, "strength", e.target.value)} />
+                <Input placeholder="Dosage" value={it.dosage} onChange={(e) => updateItem(i, "dosage", e.target.value)} />
+                <Input placeholder="Frequency" value={it.frequency} onChange={(e) => updateItem(i, "frequency", e.target.value)} />
+                <Input placeholder="Duration" value={it.duration} onChange={(e) => updateItem(i, "duration", e.target.value)} />
+                <Input placeholder="Instructions" value={it.instructions} onChange={(e) => updateItem(i, "instructions", e.target.value)} />
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-2 flex-wrap">
+            <Btn variant="outline" onClick={addItem}>+ Add Medicine</Btn>
+            <Btn icon={FileText} onClick={generate}>Generate Prescription</Btn>
+          </div>
+        </Card>
+      ) : (
+        <>
+          <PrescriptionCard p={p001} />
+          <div className="mt-4"><Btn variant="outline" icon={ArrowRight} onClick={() => navSetScreen("dashboard")}>Complete Encounter</Btn></div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function QRDisplay({ value }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.innerHTML = "";
+    if (window.QRCode) {
+      new window.QRCode(ref.current, { text: `MEDFLOW|PRESCRIPTION|${value}`, width: 88, height: 88, correctLevel: window.QRCode.CorrectLevel.M });
+    }
+  }, [value]);
+  return (
+    <div ref={ref} className="w-[96px] h-[96px] rounded-lg bg-white p-1 flex items-center justify-center" title={`Prescription QR: ${value}`}>
+      {!window.QRCode && <QrCode size={52} color={C.navy} />}
+    </div>
+  );
+}
+
+function PrescriptionCard({ p }) {
+  return (
+    <Card>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-xs font-semibold" style={{ color: C.faint }}>E-PRESCRIPTION</div>
+          <div className="mf-display text-lg font-semibold" style={{ color: C.navy }}>{p.name} · {p.id}</div>
+          <div className="text-xs mt-0.5" style={{ color: C.muted }}>Encounter {p.encounterId} · {p.prescription.doctor} · {p.prescription.datetime}</div>
+        </div>
+        <div className="flex flex-col items-center">
+          <QRDisplay value={p.prescription.qrId} />
+          <span className="mf-mono text-[10px] mt-1" style={{ color: C.faint }}>{p.prescription.qrId}</span>
+        </div>
+      </div>
+      <div className="mt-4 overflow-x-auto mf-scroll">
+        <table className="w-full text-sm">
+          <thead><tr>{["Medicine", "Strength", "Dosage", "Frequency", "Duration", "Instructions"].map((h) => (
+            <th key={h} className="text-left px-2 py-2 text-xs font-semibold" style={{ color: C.faint, borderBottom: `1px solid ${C.border}` }}>{h}</th>
+          ))}</tr></thead>
+          <tbody>{p.prescription.items.map((it, i) => (
+            <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+              <td className="px-2 py-2 font-medium" style={{ color: C.navy }}>{it.name}</td>
+              <td className="px-2 py-2">{it.strength}</td><td className="px-2 py-2">{it.dosage}</td>
+              <td className="px-2 py-2">{it.frequency}</td><td className="px-2 py-2">{it.duration}</td>
+              <td className="px-2 py-2" style={{ color: C.muted }}>{it.instructions}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+/* ============================================================
+   PHARMACY SCREENS
+   ============================================================ */
+function PharmacyVerify({ p001, updatePatient, logAction, showToast, navSetScreen }) {
+  const [scanned, setScanned] = useState(!!p001.pharmacy);
+  const [code, setCode] = useState(p001.prescription?.qrId || "");
+  if (!p001.prescription) return <EmptyState title="No prescription to verify yet" body="Waiting for a doctor to generate an e-prescription." />;
+
+  const scan = () => {
+    if (code.trim() !== p001.prescription.qrId) {
+      showToast("Prescription ID not recognized");
+      return;
+    }
+    setScanned(true);
+    updatePatient("P001", { pharmacy: { status: "Verified — awaiting dispense", at: nowTime() }, stage: "pharmacy" });
+    logAction(`Prescription verified (${p001.prescription.qrId}) — Pharmacist M. Iyer`, "Pharmacist");
+    showToast("Prescription authenticated");
+  };
+
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 12" title="Pharmacy Verification" sub="Scan QR / enter prescription ID to retrieve the encounter." />
+      {!scanned ? (
+        <Card className="text-center py-10">
+          <ScanLine size={40} color={C.sky} className="mx-auto" />
+          <p className="text-sm mt-3" style={{ color: C.muted }}>Scan the patient's QR code or enter the prescription ID.</p>
+          <div className="mt-4 flex justify-center gap-2">
+            <Input placeholder="Enter Prescription ID" value={code} onChange={(e) => setCode(e.target.value)} style={{ maxWidth: 220 }} />
+            <Btn icon={ScanLine} onClick={scan}>Verify</Btn>
+          </div>
+        </Card>
+      ) : (
+        <>
+          <Card>
+            <div className="flex items-center gap-2 mb-3"><BadgeCheck size={18} color={C.green} /><span className="font-semibold text-sm" style={{ color: C.navy }}>Prescription {p001.prescription.qrId} — Authenticated</span></div>
+            <dl className="space-y-1.5 text-sm">
+              <Row k="Patient" v={`${p001.name} · ${p001.id}`} /><Row k="Encounter ID" v={p001.encounterId} />
+              <Row k="Doctor" v={p001.prescription.doctor} /><Row k="Date" v={p001.prescription.datetime} />
+              <Row k="Status" v={p001.pharmacy ? p001.pharmacy.status : "Verified — awaiting dispense"} />
+            </dl>
+            <div className="mt-3 text-xs font-semibold" style={{ color: C.faint }}>AUTHORIZED MEDICINES</div>
+            <ul className="mt-1 text-sm list-disc list-inside" style={{ color: C.text }}>
+              {p001.prescription.items.map((it, i) => <li key={i}>{it.name} {it.strength} — {it.dosage}, {it.frequency}</li>)}
+            </ul>
+          </Card>
+          <div className="mt-4 flex gap-2"><Btn variant="outline" icon={ArrowRight} onClick={() => navSetScreen("dispense")}>Proceed to Dispense</Btn></div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PharmacyDispense({ p001, updatePatient, logAction, showToast }) {
+  const dispensed = p001.pharmacy?.status === "Verified & Dispensed";
+  if (!p001.prescription) return <EmptyState title="Nothing to dispense yet" body="Verify a prescription first." />;
+
+  const markDispensed = () => {
+    updatePatient("P001", { pharmacy: { status: "Verified & Dispensed", at: nowTime() }, stage: "pharmacy" });
+    logAction("Prescription verified & dispensed — Pharmacist M. Iyer", "Pharmacist");
+    showToast("Prescription verified and marked as dispensed.");
+  };
+
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 12b" title="Dispense Medicines" sub="Drug-interaction and allergy checks run automatically before dispensing." />
+      <Card>
+        <div className="flex items-center gap-2 mb-3"><ShieldCheck size={16} color={C.green} /><span className="text-sm font-semibold" style={{ color: C.green }}>No known drug interactions or allergy flags detected.</span></div>
+        <ul className="text-sm space-y-1.5">
+          {p001.prescription.items.map((it, i) => (
+            <li key={i} className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px dashed ${C.border}` }}>
+              <span style={{ color: C.text }}>{it.name} {it.strength}</span>
+              <Badge tone="green">Ready</Badge>
+            </li>
+          ))}
+        </ul>
+        {!dispensed ? (
+          <div className="mt-4"><Btn variant="coral" icon={Syringe} onClick={markDispensed}>Mark as Dispensed</Btn></div>
+        ) : (
+          <Card pad="p-3" className="mt-4" style={{ background: C.greenSoft, border: "none" }}>
+            <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.green }}><CheckCircle2 size={16} /> Prescription verified and marked as dispensed at {p001.pharmacy.at}.</div>
+          </Card>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   ADMIN SCREENS
+   ============================================================ */
+function AdminOverview({ patients, audit }) {
+  const all = Object.values(patients || {});
+  const live = all.filter((p) => p.name);
+  const waiting = live.filter((p) => ["queue", "triage", "symptoms"].includes(p.stage) && !p.consult).length;
+  const priority = live.filter((p) => ["Urgent", "Emergent", "High"].includes(p.triage?.finalPriority)).length;
+  const completed = live.filter((p) => p.consult || p.stage === "record").length;
+  const prescriptions = live.filter((p) => p.prescription).length;
+  const stats = [
+    { label: "Patients in workspace", value: live.length, icon: Users },
+    { label: "Waiting / active", value: waiting, icon: Clock },
+    { label: "Priority patients", value: priority, icon: AlertTriangle },
+    { label: "Consultations", value: completed, icon: CheckCircle2 },
+    { label: "Prescriptions", value: prescriptions, icon: Pill },
+    { label: "Audit events", value: audit.length, icon: Activity },
+  ];
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 13" title="Hospital Overview" sub="Live values from the current MedFlow prototype workspace." />
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+        {stats.map((s) => (
+          <Card key={s.label} pad="p-4">
+            <s.icon size={16} color={C.teal} />
+            <div className="mf-display text-2xl font-bold mt-2" style={{ color: C.navy }}>{s.value}</div>
+            <div className="text-xs mt-0.5" style={{ color: C.muted }}>{s.label}</div>
+          </Card>
+        ))}
+      </div>
+      <Card>
+        <div className="text-xs font-semibold mb-3" style={{ color: C.faint }}>WORKFLOW STATUS</div>
+        {[
+          ["Registered", live.filter((p) => p.registeredAt).length],
+          ["Triage / Queue", live.filter((p) => p.triage || p.queuePos).length],
+          ["Consulted", live.filter((p) => p.consult).length],
+          ["Dispensed", live.filter((p) => p.pharmacy?.status === "Verified & Dispensed").length],
+        ].map(([label, count]) => (
+          <div key={label} className="flex items-center justify-between py-2 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ color: C.text }}>{label}</span><Badge tone={count ? "green" : "gray"}>{count}</Badge>
+          </div>
+        ))}
+      </Card>
+      <Card pad="p-3" className="mt-4" style={{ background: C.skySoft, border: "none" }}>
+        <p className="text-xs font-semibold" style={{ color: C.teal }}>Prototype note: values are persisted locally in this browser for demo continuity; they are not hospital production statistics.</p>
+      </Card>
+    </div>
+  );
+}
+function AuditTrail({ audit }) {
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 15" title="Audit Trail" sub="Every decision, override, and access event — timestamped and attributable." />
+      <Card pad="p-0">
+        <div className="max-h-[520px] overflow-y-auto mf-scroll">
+          {audit.map((a, i) => (
+            <div key={i} className="flex items-start gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+              <span className="mf-mono text-xs shrink-0 pt-0.5" style={{ color: C.faint }}>{a.time}</span>
+              <Badge tone="gray">{a.actor}</Badge>
+              <span className="text-sm" style={{ color: C.text }}>{a.action}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function SecurityScreen() {
+  const rows = [
+    { role: "Patient", access: "Own registration, symptoms, queue status, and prescriptions only." },
+    { role: "Nurse", access: "Triage and queue information for patients under their care." },
+    { role: "Doctor", access: "Authorized clinical information — context, consultation, prescriptions." },
+    { role: "Pharmacist", access: "Authorized prescription information for verification & dispensing." },
+    { role: "Admin", access: "Aggregate flow, analytics, and audit logs — not individual clinical notes." },
+  ];
+  const features = [
+    { icon: Lock, label: "Role-Based Access Control", desc: "Each role sees only what its function requires." },
+    { icon: ShieldCheck, label: "Role-Based Workflow", desc: "Each role is presented with the actions required for its workflow." },
+    { icon: Database, label: "Local Persistence", desc: "Prototype data persists in the browser for reliable demo continuity." },
+    { icon: ScrollText, label: "Audit Trail", desc: "Key workflow decisions and actions are timestamped in the prototype." },
+  ];
+  return (
+    <div>
+      <SectionLabel eyebrow="Screen 16" title="Security & Role Management" sub="Minimum necessary access, enforced structurally — not by convention." />
+      <div className="grid md:grid-cols-2 gap-3 mb-5">
+        {features.map((f) => (
+          <Card key={f.label} className="flex items-start gap-3" style={{ display: "flex" }}>
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.tealSoft }}><f.icon size={16} color={C.teal} /></div>
+            <div><div className="font-semibold text-sm" style={{ color: C.navy }}>{f.label}</div><div className="text-xs mt-0.5" style={{ color: C.muted }}>{f.desc}</div></div>
+          </Card>
+        ))}
+      </div>
+      <Card pad="p-0">
+        {rows.map((r, i) => (
+          <div key={r.role} className="flex items-center gap-4 px-4 py-3" style={{ borderTop: i ? `1px solid ${C.border}` : "none" }}>
+            <div className="w-28 shrink-0"><Badge tone="teal">{r.role}</Badge></div>
+            <div className="text-sm" style={{ color: C.muted }}>{r.access}</div>
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
+/* ---------------- Shared empty state ---------------- */
+function EmptyState({ title, body }) {
+  return (
+    <Card className="text-center py-14">
+      <ClipboardList size={30} color={C.faint} className="mx-auto" />
+      <div className="font-semibold text-sm mt-3" style={{ color: C.navy }}>{title}</div>
+      <p className="text-xs mt-1 max-w-xs mx-auto" style={{ color: C.muted }}>{body}</p>
+    </Card>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<MedFlowPrototype />);
+  </script>
+</body>
+</html>
